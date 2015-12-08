@@ -1,0 +1,3 @@
+[submodule "node_modules/mturk"]
+	path = node_modules/mturk
+	url = https://github.com/gilt/mturk
