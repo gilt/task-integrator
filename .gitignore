@@ -26,3 +26,5 @@ build/Release
 # https://www.npmjs.org/doc/misc/npm-faq.html#should-i-check-my-node_modules-folder-into-git
 # Commenting this out, so the Github zip file can be used for the AWS deploy.
 # node_modules
+
+.DS_Store

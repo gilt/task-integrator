@@ -3,7 +3,7 @@ console.log('Running task-integrator Mechanical Turk ping function');
 var configLoader = require("./lib/dynamodb-config");
 var mturk = require('mturk');
 
-exports.handler = function(event, context) {
+exports.ping = function(event, context) {
     configLoader.loadConfig(context.functionName + "-config", function(config) {
       var mturkClient = mturk({
         creds: {
@@ -18,4 +18,9 @@ exports.handler = function(event, context) {
         context.succeed(balance + " credits in the account");
       });
     });
+};
+
+exports.upload = function(event, context) {
+  console.log("event received: ", event);
+  context.succeed("done");
 };

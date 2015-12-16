@@ -1,6 +1,9 @@
 # task-integrator
 Provides a common way to programmatically integrate human tasks through AWS.
 
+More specifically, this fills the gaps in functionality between Amazon Mechanical Turk and typical
+AWS messaging: it supports Amazon Mechanical Turk inputs through S3 and outputs to SNS.
+
 
 ## Motivation
 Amazon Mechanical Turk is an older technology in AWS and doesn't have full integration with standard
@@ -18,17 +21,16 @@ The task flow starts with a S3 bucket to which you will upload task CSVs. An AWS
 watch that bucket and push the CSV into the external task service as tasks to be completed. Once the
 humans complete the task, a second Lambda function will be notified (either via SQS or AWS API Gateway);
 this function will pull the task results from the external service and drop them as JSON messages on
-an SNS topic. You can then subscribe to that SNS topic and process the messages.
+an SNS topic - one topic per task group. You can then subscribe to that SNS topic and process the messages.
 
 
 ## Usage
 1. Create your task template.
-2. Copy the zip file from Github to your S3 bucket. Copy the full URL of the zip file.
-3. Choose a CloudFormation template, based on the external service you're using.
-4. Deploy the CloudFormation template, providing all requested parameters - including the S3 zip file.
-5. Fill in the task config, including the template ids.
-6. Upload CSVs to S3.
-7. Subscribe to the SNS topic and process the task results.
+2. Choose a CloudFormation template, based on the external service you're using.
+3. Deploy the CloudFormation template, providing all requested parameters.
+4. Fill in the task config, including the template ids.
+5. Upload CSVs to S3.
+6. Subscribe to the SNS topic and process the task results.
 
 
 ## Design choices
@@ -50,7 +52,22 @@ with pre-loaded jars - it seemed smarter (and certainly cheaper) to use Node.js 
 
 ## Maintainers
 
-## mturk module
+### Deployment
+After making changes, please do the following:
+
+1. Upload this zipped repo to the com.gilt.public.backoffice/lambda_functions bucket. To produce the .zip file:
+
+   ```
+     zip -r task-integrator.zip . -x *.git* -x *task-integrator.zip*
+   ```
+
+   Unfortunately we can't use the Github .zip file directly, because it zips the code into a subdirectory named after
+   the repo; AWS Lambda then can't find the .js file containing the integrator functions because it is not on the top-level.
+
+2. Upload the edited templates from ./cloud_formation to com.gilt.public.backoffice/cloudformation_templates
+
+
+### mturk module
 This uses a fork of the mturk module that is interoperable between OSX and Linux: https://github.com/gilt/mturk.
 If changes are made there, this project should also be updated.
 

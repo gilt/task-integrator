@@ -1,0 +1,386 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "TaskUploadS3BucketName": {
+      "Type": "String",
+      "Description": "The S3 bucket where you will upload .csv files to import. This must not already exist."
+    },
+    "TurkAccessKey": {
+      "Type": "String",
+      "Description": "The accessKey for the destination Mechanical Turk account. To be saved in a config database.",
+      "NoEcho": true
+    },
+    "TurkSecretKey": {
+      "Type": "String",
+      "Description": "The secretKey for the destination Mechanical Turk account. To be saved in a config database.",
+      "NoEcho": true
+    },
+    "TurkAccountId": {
+      "Type": "String",
+      "Description": "The accountId of the Mechanical Turk AWS account, to be used to give permissions to publish to the SQS queue.",
+      "NoEcho": true
+    },
+    "CFHelperStackName": {
+      "Type": "String",
+      "Description": "The name of the stack where you installed the CloudFormation helper functions. See https://github.com/gilt/cloudformation-helpers."
+    }
+  },
+  "Resources": {
+    "CFHelperStack": {
+      "Type": "AWS::CloudFormation::Stack",
+      "Properties": {
+        "TemplateURL": "https://s3.amazonaws.com/com.gilt.public.backoffice/cloudformation_templates/lookup_stack_outputs.template"
+      }
+    },
+    "CFHelper": {
+      "Type": "Custom::CFHelper",
+      "Properties": {
+        "ServiceToken": { "Fn::GetAtt" : ["CFHelperStack", "Outputs.LookupStackOutputsArn"] },
+        "StackName": { "Ref": "CFHelperStackName" }
+      },
+      "DependsOn": [
+        "CFHelperStack"
+      ]
+    },
+    "MTurkNotificationQueue": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "QueueName": { "Fn::Join": [ "-", [ { "Ref" : "AWS::StackName" }, "turk-notifications" ] ] }
+      }
+    },
+    "MTurkNotificationQueuePolicy": {
+      "Type" : "AWS::SQS::QueuePolicy",
+      "Properties": {
+        "PolicyDocument": {
+          "Version" : "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "sqs:SendMessage"
+              ],
+              "Principal": { "AWS": { "Fn::Join": [ "", [ "arn:aws:iam::", { "Ref": "TurkAccountId" }, ":user/MTurk-SQS" ] ] } },
+              "Resource": "*"
+            }
+          ]
+        },
+        "Queues": [
+          { "Ref": "MTurkNotificationQueue" }
+        ]
+      },
+      "DependsOn": [
+        "MTurkNotificationQueue"
+      ]
+    },
+    "ConfigDB": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "key",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "key",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 1,
+          "WriteCapacityUnits": 1
+        },
+        "TableName": { "Fn::Join": [ "-", [ { "Ref" : "AWS::StackName" }, "config" ] ] }
+      }
+    },
+    "PopulateConfig": {
+      "Type": "Custom::PopulateConfig",
+      "Properties": {
+        "ServiceToken": { "Fn::GetAtt" : ["CFHelper", "DynamoDBPutItemsFunctionArn"] },
+        "TableName": { "Ref": "ConfigDB" },
+        "Items": [
+          {
+            "key": "auth",
+            "value": {
+              "access_key": { "Ref": "TurkAccessKey" },
+              "secret_key": { "Ref": "TurkSecretKey" }
+            }
+          },
+          {
+            "key": "sandbox",
+            "value": false
+          },
+          {
+            "key": "turk_notification_queue",
+            "value": { "Fn::GetAtt" : ["MTurkNotificationQueue", "QueueName"] }
+          }
+        ]
+      },
+      "DependsOn": [
+        "CFHelper",
+        "ConfigDB",
+        "MTurkNotificationQueue"
+      ]
+    },
+    "MTurkImporterRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version" : "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [ "lambda.amazonaws.com" ]
+              },
+              "Action": [ "sts:AssumeRole" ]
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "LogWriter",
+            "PolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": "arn:aws:logs:*:*:*"
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "ConfigReader",
+            "PolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:Scan"
+                  ],
+                  "Resource": { "Fn::Join":  [ "", [ "arn:aws:dynamodb:", { "Ref": "AWS::Region" }, ":", { "Ref": "AWS::AccountId" } , ":table/", { "Ref": "ConfigDB" } ] ] }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "DependsOn": [
+        "ConfigDB"
+      ]
+    },
+    "MTurkImporterFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": "com.gilt.public.backoffice",
+          "S3Key": "lambda_functions/task-integrator.zip"
+        },
+        "Description": "Used to upload tasks from S3 into Mechanical Turk",
+        "Handler": "mechanicalTurk.upload",
+        "Role": { "Fn::GetAtt" : [ "MTurkImporterRole", "Arn" ] },
+        "Runtime": "nodejs",
+        "Timeout": 30
+      },
+      "DependsOn": [
+        "MTurkImporterRole"
+      ]
+    },
+    "MTurkImporterResourcePolicy": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": { "Fn::GetAtt": [ "MTurkImporterFunction", "Arn" ] },
+        "Principal": "s3.amazonaws.com",
+        "SourceAccount": { "Ref": "AWS::AccountId" },
+        "SourceArn": { "Fn::Join" : ["", [ "arn:aws:s3:::", { "Ref" : "TaskUploadS3BucketName" } ] ] }
+      },
+      "DependsOn": [
+        "MTurkImporterFunction"
+      ]
+    },
+    "TaskUploadS3Bucket": {
+      "Type" : "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": { "Ref": "TaskUploadS3BucketName" },
+        "NotificationConfiguration": {
+          "LambdaConfigurations": [
+            {
+              "Event": "s3:ObjectCreated:*",
+              "Function": { "Fn::GetAtt": [ "MTurkImporterFunction", "Arn" ] }
+            }
+          ]
+        }
+      },
+      "DependsOn": [
+        "MTurkImporterResourcePolicy"
+      ]
+    },
+    "TaskUploadS3BucketWriterPolicy": {
+      "Type" : "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": { "Fn::Join" : [" ", [ "Use this policy to allow uploads to the", { "Ref" : "TaskUploadS3Bucket" }, "bucket created by the task-integrator stack", { "Ref": "AWS::StackName" } ] ] },
+        "PolicyDocument": {
+          "Version" : "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:PutObject"
+              ],
+              "Resource": { "Fn::Join" : ["", [ "arn:aws:s3:::", { "Ref" : "TaskUploadS3Bucket" } ] ] }
+            }
+          ]
+        }
+      },
+      "DependsOn": [
+        "TaskUploadS3Bucket"
+      ]
+    },
+    "TaskUploadS3BucketReaderPolicy": {
+      "Type" : "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": { "Fn::Join" : [" ", [ "Use this policy to reading of uploads from the", { "Ref" : "TaskUploadS3Bucket" }, "bucket created by the task-integrator stack", { "Ref": "AWS::StackName" } ] ] },
+        "PolicyDocument": {
+          "Version" : "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject"
+              ],
+              "Resource": { "Fn::Join" : ["", [ "arn:aws:s3:::", { "Ref" : "TaskUploadS3Bucket" } ] ] }
+            }
+          ]
+        },
+        "Roles": [
+          { "Ref": "MTurkImporterRole" }
+        ]
+      },
+      "DependsOn": [
+        "TaskUploadS3Bucket"
+      ]
+    },
+    "MTurkExporterRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version" : "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [ "lambda.amazonaws.com" ]
+              },
+              "Action": [ "sts:AssumeRole" ]
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "LogWriter",
+            "PolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": "arn:aws:logs:*:*:*"
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "ConfigReader",
+            "PolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:Scan"
+                  ],
+                  "Resource": { "Fn::Join":  [ "", [ "arn:aws:dynamodb:", { "Ref": "AWS::Region" }, ":", { "Ref": "AWS::AccountId" } , ":table/", { "Ref": "ConfigDB" } ] ] }
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "QueueConsumer",
+            "PolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "sqs:DeleteMessage",
+                    "sqs:GetQueueAttributes",
+                    "sqs:GetQueueUrl",
+                    "sqs:ReceiveMessage"
+                  ],
+                  "Resource": { "Fn::GetAtt" : ["MTurkNotificationQueue", "Arn"] }
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "MessageProducer",
+            "PolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "sns:CreateTopic",
+                    "sns:ListTopics",
+                    "sns:Publish"
+                  ],
+                  "Resource": { "Fn::Join" : ["", ["arn:aws:sns:", { "Ref": "AWS::Region" }, ":", { "Ref": "AWS::AccountId" }, ":", { "Ref": "AWS::StackName" }, "-*"] ] }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "DependsOn": [
+        "ConfigDB",
+        "MTurkNotificationQueue"
+      ]
+    },
+    "MTurkExporterFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": "com.gilt.public.backoffice",
+          "S3Key": "lambda_functions/task-integrator.zip"
+        },
+        "Description": "Used to export task results from S3 into SNS",
+        "Handler": "mechanicalTurk.export",
+        "Role": { "Fn::GetAtt" : [ "MTurkExporterRole", "Arn" ] },
+        "Runtime": "nodejs",
+        "Timeout": 30
+      },
+      "DependsOn": [
+        "MTurkExporterRole"
+      ]
+    }
+  },
+  "Outputs": {
+    "TaskUploadS3BucketWriterPolicy": {
+      "Description": "The bucket policy to use when allowing access to the bucket where .csv files are uploaded for import into Mechanical Turk.",
+      "Value": { "Ref": "TaskUploadS3BucketWriterPolicy" }
+    }
+  }
+}
