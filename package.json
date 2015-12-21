@@ -1,0 +1,27 @@
+{
+  "name": "task-integrator",
+  "version": "0.0.0",
+  "description": "An AWS workflow to easily get tasks into and out of a human-task service (i.e. Mechanical Turk)",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "mocha -R spec"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gilt/task-integrator"
+  },
+  "keywords": [
+    "mturk"
+  ],
+  "author": "Ryan Martin",
+  "license": "Apache 2.0",
+  "bugs": {
+    "url": "https://github.com/gilt/task-integrator/issues"
+  },
+  "dependencies": {
+    "mturk": "gilt/mturk"
+  }
+}
