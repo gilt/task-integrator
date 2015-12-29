@@ -22,6 +22,8 @@
     "url": "https://github.com/gilt/task-integrator/issues"
   },
   "dependencies": {
-    "mturk": "gilt/mturk"
+    "csv": "0.x",
+    "mturk": "gilt/mturk",
+    "sanitize-html": "1.x"
   }
 }

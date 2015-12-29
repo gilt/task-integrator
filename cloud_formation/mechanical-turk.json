@@ -15,11 +15,6 @@
       "Description": "The secretKey for the destination Mechanical Turk account. To be saved in a config database.",
       "NoEcho": true
     },
-    "TurkAccountId": {
-      "Type": "String",
-      "Description": "The accountId of the Mechanical Turk AWS account, to be used to give permissions to publish to the SQS queue.",
-      "NoEcho": true
-    },
     "CFHelperStackName": {
       "Type": "String",
       "Description": "The name of the stack where you installed the CloudFormation helper functions. See https://github.com/gilt/cloudformation-helpers."
@@ -59,7 +54,7 @@
               "Action": [
                 "sqs:SendMessage"
               ],
-              "Principal": { "AWS": { "Fn::Join": [ "", [ "arn:aws:iam::", { "Ref": "TurkAccountId" }, ":user/MTurk-SQS" ] ] } },
+              "Principal": { "AWS": "755651556756" },
               "Resource": "*"
             }
           ]
@@ -113,7 +108,25 @@
           },
           {
             "key": "turk_notification_queue",
-            "value": { "Fn::GetAtt" : ["MTurkNotificationQueue", "QueueName"] }
+            "value": { "Ref": "MTurkNotificationQueue" }
+          },
+          {
+            "key": "layouts",
+            "value": {
+              "your-hit-layout-id-here": {
+                "Title": "title-here",
+                "Description": "description-here",
+                "Reward": {
+                  "Amount": 0,
+                  "CurrencyCode": "USD"
+                },
+                "AssignmentDurationInSeconds": 0,
+                "LifetimeInSeconds": 0,
+                "Keywords": "keywords-here",
+                "MaxAssignments": 0,
+                "AutoApprovalDelayInSeconds": 0
+              }
+            }
           }
         ]
       },
@@ -257,7 +270,7 @@
               "Action": [
                 "s3:GetObject"
               ],
-              "Resource": { "Fn::Join" : ["", [ "arn:aws:s3:::", { "Ref" : "TaskUploadS3Bucket" } ] ] }
+              "Resource": { "Fn::Join" : ["", [ "arn:aws:s3:::", { "Ref" : "TaskUploadS3Bucket" }, "/*" ] ] }
             }
           ]
         },

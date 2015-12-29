@@ -58,6 +58,7 @@ After making changes, please do the following:
 1. Upload this zipped repo to the com.gilt.public.backoffice/lambda_functions bucket. To produce the .zip file:
 
    ```
+     npm install
      zip -r task-integrator.zip . -x *.git* -x *task-integrator.zip*
    ```
 
