@@ -1,5 +1,4 @@
-console.log('Running task-integrator Mechanical Turk ping function');
-
+var async = require('async')
 var AWS = require("aws-sdk");
 var configLoader = require("./lib/dynamodb-config");
 var mturk = require('mturk');
@@ -8,6 +7,7 @@ var s3 = new AWS.S3();
 var sanitizeHtml = require('sanitize-html');
 
 exports.ping = function(event, context) {
+  console.log('Running task-integrator Mechanical Turk ping function');
   withConfigAndMTurkClient(context.functionName, '', function(mturkClient, config) {
     mturkClient.GetAccountBalance({}, function(err, balance) {
       withError(err, function() {
@@ -18,78 +18,86 @@ exports.ping = function(event, context) {
 };
 
 exports.upload = function(event, context) {
-  console.log("event received: ", JSON.stringify(event));
-  var numProcessed = 0;
+  console.log('Running task-integrator Mechanical Turk upload function');
+
   withConfigAndMTurkClient(context.functionName, 'MTurkImporterFunction', function(mturkClient, config) {
-    event.Records.forEach(function(record) {
-      var objectKey = record.s3.object.key;
-      var hitLayoutId = objectKey.substr(0, objectKey.indexOf('/'));
-      if (hitLayoutId) {
-        var request = config.layouts[hitLayoutId];
-        if (request) {
-          request["HITLayoutId"] = hitLayoutId;
-          console.log("HITLayoutId: " + hitLayoutId);
-          s3.getObject({
-            Bucket: record.s3.bucket.name,
-            Key: record.s3.object.key
-          }, function(err, s3Object) {
-            withError(err, function() {
-              console.log("s3Object: " + s3Object.Body);
-              csv.parse(s3Object.Body, function(err, csvDoc) {
-                withError(err, function() {
-                  var header = csvDoc.shift();
-                  csvDoc.forEach(function(row) {
-                    var hitLayoutParameters = {};
-                    for (var i = 0; i < header.length; i++) {
-                      hitLayoutParameters[header[i]] = sanitizeHtml(row[i]);
-                    }
-                    request["HITLayoutParameters"] = hitLayoutParameters;
-                    console.log(request);
-                    mturkClient.CreateHIT(request, function(err, hitId){
-                      withError(err, function() {
-                        console.log("Created HIT " + hitId);
-                        if (numProcessed == 0) {
-                          // Ensure that notifications are turned on for the HITType.
-                          // This be the same for all tasks in the batch, so only need
-                          // to do this once.
-                          mturkClient.GetHIT({HITId: hitId}, function(err, hit) {
-                            withError(err, function() {
-                              mturkClient.SetHITTypeNotification({
-                                HITTypeId: hit.HITTypeId,
-                                Active: true,
-                                Notification: {
-                                  Destination: config.turk_notification_queue,
-                                  Transport: "SQS",
-                                  Version: "2006-05-05",
-                                  EventType: ["AssignmentSubmitted", ""]
-                                }
-                              }, function(err, hitId) {
-                                withError(err, function() {
-                                  console.log("Set up notifications for HITTypeId " + hit.HITTypeId)
-                                });
-                              });
-                            });
-                          });
-                        }
-                        numProcessed++;
-                      });
-                    });
-                  });
-                });
+    async.concat(
+      event.Records,
+      function(record, callback) {
+        var objectKey = record.s3.object.key;
+        var hitLayoutId = objectKey.substr(0, objectKey.indexOf('/'));
+        if (hitLayoutId) {
+          var baseRequest = config.layouts[hitLayoutId];
+          if (baseRequest) {
+            console.log("HITLayoutId: " + hitLayoutId);
+            s3.getObject({
+              Bucket: record.s3.bucket.name,
+              Key: record.s3.object.key
+            }, function(err, s3Object) {
+              withError(err, function() {
+                baseRequest["HITLayoutId"] = hitLayoutId;
+                createHitsForCsv(s3Object.Body, baseRequest, mturkClient, callback);
               });
             });
-          });
+          } else {
+            callback("HitLayoutId [" + hitLayoutId + "] does not have an entry in configuration.");
+          }
         } else {
-          error("HitLayoutId [" + hitLayoutId + "] does not have an entry in configuration.")
+          callback("Object [" + objectKey + "] does not have a HITLayoutId in its path.");
         }
-      } else {
-        error("Object [" + objectKey + "] does not have a HITLayoutId in its path.");
+      },
+      function(err, hitIds) {
+        withError(err, function() {
+          if (hitIds.length > 0) {
+            // Ensure that notifications are turned on for the HITType.
+            // This will be the same for all tasks in the batch, so only
+            // need to do this once.
+            setupNotificationsForHit(hitIds[0], mturkClient, config.turk_notification_queue, function(err) {
+              withError(err, function() {
+                context.succeed(hitIds.length + " HITs created.");
+              });
+            });
+          } else {
+            console.warn("No HITs created.");
+          }
+        });
       }
-    });
-    console.log(numProcessed + " HITs created.");
-    // context.succeed(numProcessed + " HITs created.");
+    );
   });
-};
+}
+
+// --- Private helper functions ---
+
+function createHitsForCsv(csvBody, baseRequest, mturkClient, callback) {
+  csv.parse(csvBody, function(err, csvDoc) {
+    withError(err, function() {
+      var header = csvDoc.shift();
+      async.map(csvDoc, function(row, callback) {
+        createHitForCsvRow(row, header, baseRequest, mturkClient, callback);
+      }, function(err, hitIds) {
+        withError(err, function() {
+          callback(null, hitIds);
+        }, callback);
+      });
+    });
+  });
+}
+
+function createHitForCsvRow(row, header, baseRequest, mturkClient, callback) {
+  var hitLayoutParameters = {};
+  var request = baseRequest;
+  for (var i = 0; i < header.length; i++) {
+    hitLayoutParameters[header[i]] = sanitizeHtml(row[i]);
+  }
+  request["HITLayoutParameters"] = hitLayoutParameters;
+  console.log(request);
+  mturkClient.CreateHIT(request, function(err, hitId){
+    withError(err, function() {
+      console.log("Created HIT " + hitId);
+      callback(null, hitId);
+    }, callback);
+  });
+}
 
 function getStackName(functionName, functionIdentifier) {
   var i = functionName.indexOf("-" + functionIdentifier);
@@ -97,6 +105,32 @@ function getStackName(functionName, functionIdentifier) {
     return functionName.substr(0, i);
   else
     return functionName;
+}
+
+function setupNotificationsForHit(hitId, mturkClient, destinationQueueUrl, callback) {
+  mturkClient.GetHIT({ HITId: hitId }, function(err, hit) {
+    withError(err, function() {
+      setupNotificationsForHitType(hit.HITTypeId, mturkClient, destinationQueueUrl, callback);
+    }, callback);
+  });
+}
+
+function setupNotificationsForHitType(hitTypeId, mturkClient, destinationQueueUrl, callback) {
+  mturkClient.SetHITTypeNotification({
+    HITTypeId: hitTypeId,
+    Active: true,
+    Notification: {
+      Destination: destinationQueueUrl,
+      Transport: "SQS",
+      Version: "2006-05-05",
+      EventType: ["AssignmentSubmitted", ""]
+    }
+  }, function(err, hitId) {
+    withError(err, function() {
+      console.log("Set up notifications for HITTypeId " + hitTypeId);
+      callback();
+    }, callback);
+  });
 }
 
 // The functionIdentifier must match the section from the CloudFormation template that creates the Lambda function.
@@ -118,9 +152,13 @@ function error(err) {
   throw err;
 }
 
-function withError(err, callback) {
+function withError(err, callback, errorCallback) {
   if (err) {
-    error(err);
+    if (errorCallback) {
+      errorCallback(err);
+    } else {
+      error(err);
+    }
   }
   callback();
 }

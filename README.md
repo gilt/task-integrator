@@ -33,6 +33,52 @@ an SNS topic - one topic per task group. You can then subscribe to that SNS topi
 6. Subscribe to the SNS topic and process the task results.
 
 
+## Implementations
+
+### Amazon Mechanical Turk
+
+#### Config
+
+##### auth
+A Map with two key-value pairs: access_key and secret_key. These should come from your Mechanical Turk
+AWS account. They are parameters of the CloudFormation template and will be automatically populated into
+config as part of the stack creation.
+
+##### layouts
+A Map with a key for each layout_id from Mechanical Turk. The value for each key will be a Map of this format:
+
+```
+{
+  "AssignmentDurationInSeconds": 600,
+  "AutoApprovalDelayInSeconds": 0,
+  "Description": "Example description",
+  "Keywords": "example, keywords",
+  "LifetimeInSeconds": 36000,
+  "MaxAssignments": 1,
+  "Reward": {
+    "Amount": 1.00,
+    "CurrencyCode": "USD"
+  },
+  "Title": "Example Title"
+}
+```
+
+Admittedly, this is awful - because it duplicates the values you already set up in the Mechanical Turk project.
+But the Mechanical Turk API does not provide access to these values (only the layout_id) and thus they are a
+required part of the config here. The stack creation will populate this config with an example document, but
+you will need to copy the format and fill in the correct values for each of your different layouts.
+
+The key (i.e. layout_id) is expected to correspond to a folder in the upload bucket that is set up during the
+stack creation. Uploads to that folder will use the config specified here.
+
+##### sandbox
+Boolean, indicating whether or not the Mechanical Turk sandbox should be referenced by this stack.
+
+##### turk_notification_queue
+This will be automatically set with the SQS queue that is set up during the creation of the CloudFormation
+stack. It is the URL of the queue.
+
+
 ## Design choices
 
 ### Including node_modules in the project
