@@ -30,7 +30,10 @@ an SNS topic - one topic per task group. You can then subscribe to that SNS topi
 3. Deploy the CloudFormation template, providing all requested parameters.
 4. Fill in the task config, including the template ids.
 5. Upload CSVs to S3.
-6. Subscribe to the SNS topic and process the task results.
+6. Subscribe to the SNS topic and process the task results. If you don't want to miss messages, you should
+   create your SNS topics (and subscriptions) ahead of time, in the format: stack_name-hit_layout_id. The
+   Lambda function will automaticall create SNS topic if they don't exist, but they won't have subscriptions
+   and thus messages will be missed (though they can be found in the logs).
 
 
 ## Implementations
@@ -77,6 +80,11 @@ Boolean, indicating whether or not the Mechanical Turk sandbox should be referen
 ##### turk_notification_queue
 This will be automatically set with the SQS queue that is set up during the creation of the CloudFormation
 stack. It is the URL of the queue.
+
+
+#### Annoyances
+1. Mechanical Turk only supports notifications to SQS, not SNS - so the notification model is a pull, not a
+   push. As such, the Lambda function must be scheduled and can't simply run when the notification happens.
 
 
 ## Design choices

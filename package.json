@@ -25,6 +25,7 @@
     "async": "1.5.x",
     "csv": "0.x",
     "mturk": "gilt/mturk",
-    "sanitize-html": "1.x"
+    "sanitize-html": "1.x",
+    "xml2js": "0.4.x"
   }
 }

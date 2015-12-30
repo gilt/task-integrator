@@ -1,10 +1,14 @@
-var async = require('async')
-var AWS = require("aws-sdk");
-var configLoader = require("./lib/dynamodb-config");
-var mturk = require('mturk');
-var csv = require('csv');
-var s3 = new AWS.S3();
-var sanitizeHtml = require('sanitize-html');
+var async = require('async'),
+    AWS = require("aws-sdk"),
+    configLoader = require("./lib/dynamodb-config"),
+    csv = require('csv'),
+    mturk = require('mturk'),
+    s3 = new AWS.S3(),
+    sanitizeHtml = require('sanitize-html'),
+    sns = new AWS.SNS(),
+    sqs = new AWS.SQS(),
+    xml2js = require('xml2js').Parser();
+var snsArns = {};
 
 exports.ping = function(event, context) {
   console.log('Running task-integrator Mechanical Turk ping function');
@@ -20,7 +24,8 @@ exports.ping = function(event, context) {
 exports.upload = function(event, context) {
   console.log('Running task-integrator Mechanical Turk upload function');
 
-  withConfigAndMTurkClient(context.functionName, 'MTurkImporterFunction', function(mturkClient, config) {
+  var stackName = getStackName(context.functionName, 'MTurkImporterFunction');
+  withConfigAndMTurkClient(stackName, function(mturkClient, config) {
     async.concat(
       event.Records,
       function(record, callback) {
@@ -66,6 +71,46 @@ exports.upload = function(event, context) {
   });
 }
 
+exports.export = function(event, context) {
+  console.log('Running task-integrator Mechanical Turk export function');
+
+  var stackName = getStackName(context.functionName, 'MTurkExporterFunction');
+  withConfigAndMTurkClient(stackName, function(mturkClient, config) {
+    async.times(10, function(n, next) {
+      sqs.receiveMessage({
+        QueueUrl: config.turk_notification_queue,
+        MaxNumberOfMessages: 10
+      }, function(err, data) {
+        withError(err, function() {
+          async.concat(data.Messages, function(message, callback) {
+            console.log("Received Mechanical Turk notification: " + message.Body);
+            moveFromMturkToSns(JSON.parse(message.Body), stackName, mturkClient, function(err, results) {
+              withError(err, function() {
+                sqs.deleteMessage({
+                  QueueUrl: config.turk_notification_queue,
+                  ReceiptHandle: message.ReceiptHandle
+                }, function(err, data) {
+                  withError(err, function() {
+                    callback(null, results);
+                  }, callback);
+                });
+              });
+            });
+          }, function(err, results) {
+            withError(err, function() {
+              next(null, results);
+            }, next);
+          });
+        });
+      });
+    }, function(err, results) {
+      var flattened = [].concat.apply([], results);
+      console.log('[' + flattened.join(',') + '] messages created');
+      context.succeed(flattened.length + ' messages pushed to SNS.');
+    });
+  });
+}
+
 // --- Private helper functions ---
 
 function createHitsForCsv(csvBody, baseRequest, mturkClient, callback) {
@@ -99,12 +144,68 @@ function createHitForCsvRow(row, header, baseRequest, mturkClient, callback) {
   });
 }
 
+function withSnsArnFromHitId(hitId, stackName, mturkClient, callback) {
+  mturkClient.GetHIT({ HITId: hitId }, function(err, hit) {
+    withError(err, function() {
+      if (snsArns[hit.HITLayoutId] == undefined) {
+        sns.createTopic({ Name: stackName + "-" + hit.HITLayoutId }, function(err, data) {
+          withError(err, function() {
+            snsArns[hit.HITLayoutId] = data.TopicArn;
+            callback(null, data.TopicArn);
+          }, callback);
+        });
+      } else {
+        callback(null, snsArns[hit.HITLayoutId]);
+      }
+    }, callback);
+  })
+}
+
+// The functionIdentifier must match the section from the CloudFormation template that creates the Lambda function.
 function getStackName(functionName, functionIdentifier) {
   var i = functionName.indexOf("-" + functionIdentifier);
   if (functionIdentifier && i >= 0)
     return functionName.substr(0, i);
   else
     return functionName;
+}
+
+function moveFromMturkToSns(notificationMsg, stackName, mturkClient, callback) {
+  async.map(
+    notificationMsg.Events,
+    function(event, callback) {
+      mturkClient.GetAssignment({ AssignmentId: event.AssignmentId }, function(err, assignment) {
+        withError(err, function() {
+          withSnsArnFromHitId(assignment.HITId, stackName, mturkClient, function(err, topicArn) {
+            xml2js.parseString(assignment.Answer, function(err, doc) {
+              withError(err, function() {
+                doc = xml2js2JSON(doc);
+                message = {};
+                doc.QuestionFormAnswers.Answer.forEach(function(answer) {
+                  // TODO: support an uploaded file here
+                  message[answer.QuestionIdentifier] = answer.FreeText || answer.SelectionIdentifier || answer.OtherSelectionText;
+                });
+                sns.publish({
+                  Message: JSON.stringify(message),
+                  TopicArn: topicArn
+                }, function(err, data) {
+                  withError(err, function() {
+                    console.log("Sending message to SNS: " + JSON.stringify(message));
+                    callback(null, data.MessageId);
+                  }, callback);
+                });
+              }, callback);
+            });
+          });
+        }, callback);
+      });
+    },
+    function(err, results) {
+      withError(err, function() {
+        callback(null, results);
+      });
+    }
+  );
 }
 
 function setupNotificationsForHit(hitId, mturkClient, destinationQueueUrl, callback) {
@@ -133,9 +234,8 @@ function setupNotificationsForHitType(hitTypeId, mturkClient, destinationQueueUr
   });
 }
 
-// The functionIdentifier must match the section from the CloudFormation template that creates the Lambda function.
-function withConfigAndMTurkClient(functionName, functionIdentifier, callback) {
-  configLoader.loadConfig(getStackName(functionName, functionIdentifier) + "-config", function(config) {
+function withConfigAndMTurkClient(stackName, callback) {
+  configLoader.loadConfig(stackName + "-config", function(config) {
     var mturkClient = mturk({
       creds: {
         accessKey: config.auth.access_key,
@@ -145,6 +245,26 @@ function withConfigAndMTurkClient(functionName, functionIdentifier, callback) {
     });
     callback(mturkClient, config);
   });
+}
+
+function xml2js2JSON(elem) {
+  if (typeof elem === 'string' || elem instanceof String) {
+    return elem;
+  } else if (elem && elem.length && elem.length <= 1) {
+    return xml2js2JSON(elem[0]);
+  } else if (elem && elem.length) {
+    var converted = [];
+    for (var i = 0; i < elem.length; i++) {
+      converted.push(xml2js2JSON(elem[i]));
+    };
+    return converted;
+  } else {
+    var converted = {};
+    Object.getOwnPropertyNames(elem).forEach(function(key) {
+      converted[key] = xml2js2JSON(elem[key]);
+    });
+    return converted;
+  }
 }
 
 function error(err) {
