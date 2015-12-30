@@ -26,7 +26,8 @@ an SNS topic - one topic per task group. You can then subscribe to that SNS topi
 
 ## Usage
 1. Create your task template.
-2. Choose a CloudFormation template, based on the external service you're using.
+2. Choose a CloudFormation template, based on the external service you're using:
+  a. https://s3.amazonaws.com/com.gilt.public.backoffice/cloudformation_templates/task-integrator-mechanical-turk.template
 3. Deploy the CloudFormation template, providing all requested parameters.
 4. Fill in the task config, including the template ids.
 5. Upload CSVs to S3.
@@ -39,6 +40,9 @@ an SNS topic - one topic per task group. You can then subscribe to that SNS topi
 ## Implementations
 
 ### Amazon Mechanical Turk
+
+#### Amazon CloudFormation template
+https://s3.amazonaws.com/com.gilt.public.backoffice/cloudformation_templates/task-integrator-mechanical-turk.template
 
 #### Config
 
@@ -85,6 +89,12 @@ stack. It is the URL of the queue.
 #### Annoyances
 1. Mechanical Turk only supports notifications to SQS, not SNS - so the notification model is a pull, not a
    push. As such, the Lambda function must be scheduled and can't simply run when the notification happens.
+
+2. No part of the AWS API supports setting up a Scheduled Event event source for a Lambda function. The
+   exporter function must poll SQS to receive notifications, so this is necessary. Until Amazon adds support
+   for this, the template will subscribe to the Unreliable Town Clock public SNS topic, which provides events
+   every 15 mins (https://alestic.com/2015/05/aws-lambda-recurring-schedule). If you need a different schedule,
+   feel free to remove this subscription and manually set up your own scheduled event through the UI.
 
 
 ## Design choices

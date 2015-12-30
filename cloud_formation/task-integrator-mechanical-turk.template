@@ -388,6 +388,31 @@
       "DependsOn": [
         "MTurkExporterRole"
       ]
+    },
+    "MTurkExporterResourcePolicy": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": { "Fn::GetAtt": [ "MTurkExporterFunction", "Arn" ] },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": "arn:aws:sns:us-east-1:522480313337:unreliable-town-clock-topic-178F1OQACHTYF"
+      },
+      "DependsOn": [
+        "MTurkExporterFunction"
+      ]
+    },
+    "SetupScheduledEventForMTurkExporterFunction": {
+      "Type": "Custom::SetupScheduledEventForMTurkExporterFunction",
+      "Properties": {
+        "ServiceToken": { "Fn::GetAtt" : ["CFHelper", "SnsSubscribeFunctionArn"] },
+        "TopicArn": "arn:aws:sns:us-east-1:522480313337:unreliable-town-clock-topic-178F1OQACHTYF",
+        "Protocol": "lambda",
+        "Endpoint": { "Fn::GetAtt" : [ "MTurkExporterFunction", "Arn" ] }
+      },
+      "DependsOn": [
+        "CFHelper",
+        "MTurkExporterFunction"
+      ]
     }
   },
   "Outputs": {
