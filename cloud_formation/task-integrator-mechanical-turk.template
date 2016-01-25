@@ -89,6 +89,28 @@
         "TableName": { "Fn::Join": [ "-", [ { "Ref" : "AWS::StackName" }, "config" ] ] }
       }
     },
+    "TaskDB": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "task_id",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "task_id",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 1,
+          "WriteCapacityUnits": 1
+        },
+        "TableName": { "Fn::Join": [ "-", [ { "Ref" : "AWS::StackName" }, "tasks" ] ] }
+      }
+    },
     "PopulateConfig": {
       "Type": "Custom::PopulateConfig",
       "Properties": {
@@ -109,24 +131,6 @@
           {
             "key": "turk_notification_queue",
             "value": { "Ref": "MTurkNotificationQueue" }
-          },
-          {
-            "key": "layouts",
-            "value": {
-              "your-hit-layout-id-here": {
-                "Title": "title-here",
-                "Description": "description-here",
-                "Reward": {
-                  "Amount": 0,
-                  "CurrencyCode": "USD"
-                },
-                "AssignmentDurationInSeconds": 0,
-                "LifetimeInSeconds": 0,
-                "Keywords": "keywords-here",
-                "MaxAssignments": 0,
-                "AutoApprovalDelayInSeconds": 0
-              }
-            }
           }
         ]
       },
@@ -180,6 +184,21 @@
                     "dynamodb:Scan"
                   ],
                   "Resource": { "Fn::Join":  [ "", [ "arn:aws:dynamodb:", { "Ref": "AWS::Region" }, ":", { "Ref": "AWS::AccountId" } , ":table/", { "Ref": "ConfigDB" } ] ] }
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "TaskWriter",
+            "PolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:PutItem"
+                  ],
+                  "Resource": { "Fn::Join":  [ "", [ "arn:aws:dynamodb:", { "Ref": "AWS::Region" }, ":", { "Ref": "AWS::AccountId" } , ":table/", { "Ref": "TaskDB" } ] ] }
                 }
               ]
             }
@@ -326,6 +345,21 @@
                     "dynamodb:Scan"
                   ],
                   "Resource": { "Fn::Join":  [ "", [ "arn:aws:dynamodb:", { "Ref": "AWS::Region" }, ":", { "Ref": "AWS::AccountId" } , ":table/", { "Ref": "ConfigDB" } ] ] }
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "TaskReader",
+            "PolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:GetItem"
+                  ],
+                  "Resource": { "Fn::Join":  [ "", [ "arn:aws:dynamodb:", { "Ref": "AWS::Region" }, ":", { "Ref": "AWS::AccountId" } , ":table/", { "Ref": "TaskDB" } ] ] }
                 }
               ]
             }

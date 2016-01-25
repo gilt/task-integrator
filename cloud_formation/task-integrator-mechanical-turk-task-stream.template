@@ -1,0 +1,162 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "TaskIntegratorStackName": {
+      "Type": "String",
+      "Description": "The name of the task integrator stack, which should be set up before this stack. Resource are expected to follow that template's pattern."
+    },
+    "TaskUploadS3BucketName": {
+      "Type": "String",
+      "Description": "The S3 bucket where you will upload .csv files to import. This must already exist."
+    },
+    "HITLayoutId": {
+      "Type": "String",
+      "Description": "The LayoutId for the HIT task template that this task stream should use."
+    },
+    "MaxAssignments": {
+      "Type": "Number",
+      "Description": "The maximum number of available assignments for each HIT uploaded to the task stream."
+    },
+    "Reward": {
+      "Type": "Number",
+      "Description": "The amount (in USD) paid for the completion of each task in the stream."
+    },
+    "Title": {
+      "Type": "String",
+      "Description": "The title of the Mechanical Turk task."
+    },
+    "Description": {
+      "Type": "String",
+      "Description": "The detailed description of the Mechanical Turk task."
+    },
+    "Keywords": {
+      "Type": "String",
+      "Description": "The search keywords of the Mechanical Turk task."
+    },
+    "AssignmentDuration": {
+      "Type": "Number",
+      "Description": "The number of seconds that the Turker has to complete the task."
+    },
+    "AssignmentLifetime": {
+      "Type": "Number",
+      "Description": "The number of seconds that the task should be available for completion."
+    },
+    "CFHelperStackName": {
+      "Type": "String",
+      "Description": "The name of the stack where you installed the CloudFormation helper functions. See https://github.com/gilt/cloudformation-helpers."
+    }
+  },
+  "Resources": {
+    "CFHelperStack": {
+      "Type": "AWS::CloudFormation::Stack",
+      "Properties": {
+        "TemplateURL": "https://s3.amazonaws.com/com.gilt.public.backoffice/cloudformation_templates/lookup_stack_outputs.template"
+      }
+    },
+    "CFHelper": {
+      "Type": "Custom::CFHelper",
+      "Properties": {
+        "ServiceToken": { "Fn::GetAtt" : ["CFHelperStack", "Outputs.LookupStackOutputsArn"] },
+        "StackName": { "Ref": "CFHelperStackName" }
+      },
+      "DependsOn": [
+        "CFHelperStack"
+      ]
+    },
+    "PopulateConfig": {
+      "Type": "Custom::PopulateConfig",
+      "Properties": {
+        "ServiceToken": { "Fn::GetAtt" : ["CFHelper", "DynamoDBPutItemsFunctionArn"] },
+        "TableName": { "Fn::Join": [ "-", [ { "Ref" : "TaskIntegratorStackName" }, "config" ] ] },
+        "Items": [
+          {
+            "key": { "Fn::Join": [ "-", [ "tasks", { "Ref" : "AWS::StackName" } ] ] },
+            "value": {
+              "Title": { "Ref": "Title" },
+              "Description": { "Ref": "Description" },
+              "Reward": {
+                "Amount": { "Ref": "Reward" },
+                "CurrencyCode": "USD"
+              },
+              "HITLayoutId": { "Ref": "HITLayoutId" },
+              "AssignmentDurationInSeconds": { "Ref": "AssignmentDuration" },
+              "LifetimeInSeconds": { "Ref": "AssignmentLifetime" },
+              "Keywords": { "Ref": "Keywords" },
+              "MaxAssignments": { "Ref": "MaxAssignments" },
+              "AutoApprovalDelayInSeconds": 0
+            }
+          }
+        ]
+      },
+      "DependsOn": [
+        "CFHelper"
+      ]
+    },
+    "CreateS3Folder": {
+      "Type": "Custom::CreateS3Folder",
+      "Properties": {
+        "ServiceToken": { "Fn::GetAtt" : ["CFHelper", "S3PutObjectFunctionArn"] },
+        "Bucket": { "Ref": "TaskUploadS3BucketName" },
+        "Key": { "Fn::Join": [ "", [ { "Ref" : "AWS::StackName" }, "/" ] ] }
+      },
+      "DependsOn": [
+        "CFHelper"
+      ]
+    },
+    "SqsOutputQueue": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "QueueName": { "Fn::Join": [ "-", [ { "Ref" : "TaskIntegratorStackName" }, { "Ref" : "AWS::StackName" } ] ] }
+      }
+    },
+    "SnsOutputTopic": {
+      "Type" : "AWS::SNS::Topic",
+      "Properties": {
+        "TopicName": { "Fn::Join": [ "-", [ { "Ref" : "TaskIntegratorStackName" }, { "Ref" : "AWS::StackName" } ] ] },
+        "Subscription": [
+          {
+            "Endpoint": { "Fn::GetAtt" : ["SqsOutputQueue", "Arn"] },
+            "Protocol": "sqs"
+          }
+        ]
+      },
+      "DependsOn": [
+        "SqsOutputQueue"
+      ]
+    },
+    "SqsOutputQueuePolicy": {
+      "Type" : "AWS::SQS::QueuePolicy",
+      "Properties": {
+        "PolicyDocument": {
+          "Version" : "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "sqs:SendMessage"
+              ],
+              "Principal": "*",
+              "Resource": "*",
+              "Condition": {
+                "ArnEquals": { "aws:SourceArn": { "Ref": "SnsOutputTopic" } }
+              }
+            }
+          ]
+        },
+        "Queues": [
+          { "Ref": "SqsOutputQueue" }
+        ]
+      },
+      "DependsOn": [
+        "SqsOutputQueue",
+        "SnsOutputTopic"
+      ]
+    }
+  },
+  "Outputs": {
+    "OutputQueue": {
+      "Description": "The URL of the queue where task results will be published.",
+      "Value": { "Ref": "SqsOutputQueue" }
+    }
+  }
+}

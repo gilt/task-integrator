@@ -2,6 +2,7 @@ var Promise = require('bluebird');
 var AWS = require("aws-sdk"),
     configLoader = require("./lib/dynamodb-config"),
     csv = Promise.promisifyAll(require('csv')),
+    dynamodb = Promise.promisifyAll(new AWS.DynamoDB()),
     mturk = require('mturk'),
     s3 = Promise.promisifyAll(new AWS.S3()),
     sanitizeHtml = require('sanitize-html'),
@@ -36,25 +37,43 @@ exports.upload = function(event, lambdaContext) {
       event.Records,
       function(record) {
         var objectKey = record.s3.object.key;
-        var hitLayoutId = objectKey.substr(0, objectKey.indexOf('/'));
-        if (hitLayoutId) {
-          var baseRequest = context.config.layouts[hitLayoutId];
+        var taskName = objectKey.substr(0, objectKey.indexOf('/'));
+        if (taskName) {
+          var baseRequest = context.config["tasks-" + taskName];
           if (baseRequest) {
-            console.log("HITLayoutId: " + hitLayoutId);
+            console.log("taskName: " + taskName);
             return s3
             .getObjectAsync({
               Bucket: record.s3.bucket.name,
               Key: record.s3.object.key
             })
             .then(function(s3Object) {
-              baseRequest["HITLayoutId"] = hitLayoutId;
               return createHitsForCsv(s3Object.Body, baseRequest, context.mturkClient);
+            })
+            .then(function(hitIds) {
+              return Promise
+              .each(
+                hitIds,
+                function(hitId) {
+                  return dynamodb
+                  .putItemAsync({
+                    TableName: stackName + "-tasks",
+                    Item: {
+                      task_id: {'S': hitId},
+                      task_name: {'S': taskName}
+                    }
+                  })
+                  .then(function(data) {
+                    return hitId;
+                  });
+                }
+              );
             });
           } else {
-            throw "HitLayoutId [" + hitLayoutId + "] does not have an entry in configuration.";
+            throw "Task [" + taskName + "] does not have an entry in configuration.";
           }
         } else {
-          throw "Object [" + objectKey + "] does not have a HITLayoutId in its path.";
+          throw "Object [" + objectKey + "] does not have a taskName in its path.";
         }
       }
     )
@@ -157,20 +176,29 @@ function createHitsForCsv(csvBody, baseRequest, mturkClient) {
   });
 }
 
-// Returns a Promise containing the SNS ARN for the SNS Topic for the HIT's HITLayoutId
-function getSnsArn(hitId, stackName, mturkClient) {
-  return mturkClient
-  .GetHITAsync({ HITId: hitId })
-  .then(function(hit) {
-    if (snsArns[hit.HITLayoutId] == undefined) {
-      return sns
-      .createTopicAsync({ Name: stackName + "-" + hit.HITLayoutId })
-      .then(function(data) {
-        snsArns[hit.HITLayoutId] = data.TopicArn; // Save for later
-        return data.TopicArn;
-      });
+// Returns a Promise containing the SNS ARN for the SNS Topic for the HIT's task_name
+function getSnsArn(hitId, stackName) {
+  return dynamodb
+  .getItemAsync({
+    TableName: stackName + "-tasks",
+    Key: { task_id: {'S': hitId}}
+  })
+  .then(function(data) {
+    console.log("data: " + JSON.stringify(data));
+    if (data.Item) {
+      var taskName = data.Item.task_name.S;
+      if (snsArns[taskName] == undefined) {
+        return sns
+        .createTopicAsync({ Name: stackName + "-" + taskName })
+        .then(function(data) {
+          snsArns[taskName] = data.TopicArn; // Save for future reference
+          return data.TopicArn;
+        });
+      } else {
+        return snsArns[taskName];
+      }
     } else {
-      return snsArns[hit.HITLayoutId];
+      throw "Problem finding task_name for HITId [" + hitId + "]";
     }
   });
 }
@@ -193,7 +221,7 @@ function moveFromMturkToSns(notificationMsg, stackName, mturkClient) {
       return mturkClient
       .GetAssignmentAsync({ AssignmentId: event.AssignmentId })
       .then(function(assignment) {
-        return getSnsArn(assignment.HITId, stackName, mturkClient)
+        return getSnsArn(assignment.HITId, stackName)
         .then(function(topicArn) {
           return xml2js
           .parseStringAsync(assignment.Answer)
