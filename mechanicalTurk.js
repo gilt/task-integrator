@@ -39,7 +39,7 @@ exports.upload = function(event, lambdaContext) {
         var objectKey = record.s3.object.key;
         var taskName = objectKey.substr(0, objectKey.indexOf('/'));
         if (taskName) {
-          var baseRequest = context.config["tasks-" + taskName];
+          var baseRequest = context.config["task-stream-" + taskName];
           if (baseRequest) {
             console.log("taskName: " + taskName);
             return s3

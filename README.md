@@ -52,7 +52,7 @@ A Map with two key-value pairs: access_key and secret_key. These should come fro
 AWS account. They are parameters of the CloudFormation template and will be automatically populated into
 config as part of the stack creation.
 
-##### tasks-*
+##### task-stream-*
 A Map of HIT settings for a stream of Mechanical Turk tasks. This will be created when you use the
 task-integrator-mechanical-turk-task-stream.template. The Map will be in this format:
 
@@ -77,7 +77,7 @@ Admittedly, this is awful - because it duplicates the values you already set up 
 But the Mechanical Turk API does not provide access to these values (only the layout_id) and thus they are a
 required part of the config here. There is one config entry per HIT task because the stream name can't be loaded
 in as the key of a top-level Map (i.e. the config key name would be 'tasks' and the value would be a Map of
-stream-name to HIT settings) - thus the 'tasks-*' format of the key name (where '*' is replaced by your stream name).
+stream-name to HIT settings) - thus the 'task-stream-*' format of the key name (where '*' is replaced by your stream name).
 
 ##### sandbox
 Boolean, indicating whether or not the Mechanical Turk sandbox should be referenced by this stack.
