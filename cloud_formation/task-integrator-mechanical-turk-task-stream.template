@@ -151,12 +151,41 @@
         "SqsOutputQueue",
         "SnsOutputTopic"
       ]
+    },
+    "QueueProcessorPolicy": {
+      "Type" : "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": { "Fn::Join": [ " ", [ "Allows processing of messages from the", { "Fn::GetAtt" : ["SqsOutputQueue", "QueueName"] }, "queue." ] ] },
+        "PolicyDocument": {
+          "Version" : "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "sqs:DeleteMessage",
+                "sqs:ReceiveMessage"
+              ],
+              "Resource": [
+                "arn:aws:sqs:us-east-1:905260852223:turk-integrator-test-comp-pricing-test"
+              ]
+            }
+          ]
+        }
+      },
+      "DependsOn": [
+        "SqsOutputQueue",
+        "SnsOutputTopic"
+      ]
     }
   },
   "Outputs": {
     "OutputQueue": {
       "Description": "The URL of the queue where task results will be published.",
       "Value": { "Ref": "SqsOutputQueue" }
+    },
+    "OutputQueueProcessorPolicy": {
+      "Description": "Associate this with users or roles that need to process messages from the output queue.",
+      "Value": { "Ref": "QueueProcessorPolicy" }
     }
   }
 }
