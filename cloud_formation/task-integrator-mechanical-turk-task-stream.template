@@ -152,6 +152,29 @@
         "SnsOutputTopic"
       ]
     },
+    "TaskCreatorPolicy": {
+      "Type" : "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": { "Fn::Join": [ " ", [ "Allows uploading CSVs to the", { "Fn::Join": [ "/", [ { "Ref": "TaskUploadS3BucketName" }, { "Ref" : "AWS::StackName" } ] ] }, "S3 folder." ] ] },
+        "PolicyDocument": {
+          "Version" : "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:PutObject"
+              ],
+              "Resource": [
+                { "Fn::Join": [ "", [ "arn:aws:s3:::", { "Ref": "TaskUploadS3BucketName" }, "/", { "Ref" : "AWS::StackName" }, "/*" ] ] }
+              ]
+            }
+          ]
+        }
+      },
+      "DependsOn": [
+        "CreateS3Folder"
+      ]
+    },
     "QueueProcessorPolicy": {
       "Type" : "AWS::IAM::ManagedPolicy",
       "Properties": {
@@ -188,6 +211,10 @@
     "OutputQueueProcessorPolicy": {
       "Description": "Associate this with users or roles that need to process messages from the output queue.",
       "Value": { "Ref": "QueueProcessorPolicy" }
+    },
+    "TaskCreatorPolicy": {
+      "Description": "Associate this with users or roles that need to upload task CSVs to S3.",
+      "Value": { "Ref": "TaskCreatorPolicy" }
     }
   }
 }
