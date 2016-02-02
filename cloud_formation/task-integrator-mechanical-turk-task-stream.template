@@ -70,7 +70,7 @@
         "TableName": { "Fn::Join": [ "-", [ { "Ref" : "TaskIntegratorStackName" }, "config" ] ] },
         "Items": [
           {
-            "key": { "Fn::Join": [ "-", [ "tasks", { "Ref" : "AWS::StackName" } ] ] },
+            "key": { "Fn::Join": [ "-", [ "task-stream", { "Ref" : "AWS::StackName" } ] ] },
             "value": {
               "Title": { "Ref": "Title" },
               "Description": { "Ref": "Description" },
