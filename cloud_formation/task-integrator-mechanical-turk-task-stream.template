@@ -163,6 +163,8 @@
               "Effect": "Allow",
               "Action": [
                 "sqs:DeleteMessage",
+                "sqs:GetQueueAttributes",
+                "sqs:GetQueueUrl",
                 "sqs:ReceiveMessage"
               ],
               "Resource": [
