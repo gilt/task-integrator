@@ -29,9 +29,11 @@ an SNS topic - one topic per task group. You can then subscribe to that SNS topi
 2. Choose a CloudFormation template, based on the external service you're using:
   a. https://s3.amazonaws.com/com.gilt.public.backoffice/cloudformation_templates/task-integrator-mechanical-turk.template
 3. Deploy the CloudFormation template, providing all requested parameters.
-4. Fill in the task config, including the template ids.
-5. Upload CSVs to S3.
-6. Subscribe to the SNS topic and process the task results. If you don't want to miss messages, you should
+4. Deploy the CloudFormation template for each stream of tasks:
+  a. https://s3.amazonaws.com/com.gilt.public.backoffice/cloudformation_templates/task-integrator-mechanical-turk-task-stream.template
+5. Fill in the QualificationRequirement for the task stream.
+6. Upload CSVs to S3.
+7. Subscribe to the SNS topic and process the task results. If you don't want to miss messages, you should
    create your SNS topics (and subscriptions) ahead of time, in the format: stack_name-hit_layout_id. The
    Lambda function will automaticall create SNS topic if they don't exist, but they won't have subscriptions
    and thus messages will be missed (though they can be found in the logs).
@@ -78,6 +80,10 @@ But the Mechanical Turk API does not provide access to these values (only the la
 required part of the config here. There is one config entry per HIT task because the stream name can't be loaded
 in as the key of a top-level Map (i.e. the config key name would be 'tasks' and the value would be a Map of
 stream-name to HIT settings) - thus the 'task-stream-*' format of the key name (where '*' is replaced by your stream name).
+
+The QualificationRequirement configuration is intentionally left to the user to fill in manually. This is because
+the requirement configuration can vary wildly, and it's hard to support all use cases through CloudFormation. If
+there proves to be a common use case that should be supported out of the box, we can add that in the future.
 
 ##### sandbox
 Boolean, indicating whether or not the Mechanical Turk sandbox should be referenced by this stack.
