@@ -191,7 +191,7 @@
                 "sqs:ReceiveMessage"
               ],
               "Resource": [
-                "arn:aws:sqs:us-east-1:905260852223:turk-integrator-test-comp-pricing-test"
+                { "Fn::GetAtt" : ["SqsOutputQueue", "Arn"] }
               ]
             }
           ]
