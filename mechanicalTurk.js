@@ -69,6 +69,15 @@ exports.upload = function(event, lambdaContext) {
                   });
                 }
               );
+            })
+            .then(function(hitIds) {
+              return logMetric(stackName + '-' + taskName + '-tasks-created', hitIds.length)
+              .then(function() {
+                return logMetric(stackName + '-' + taskName + '-assignments-created', hitIds.length * baseRequest["MaxAssignments"])
+              })
+              .then(function() {
+                return hitIds;
+              });
             });
           } else {
             throw "Task [" + taskName + "] does not have an entry in configuration.";
@@ -271,8 +280,11 @@ function moveFromMturkToSns(notificationMsg, stackName, mturkClient) {
               TopicArn: topicArn
             })
             .then(function(data) {
-              console.log("Sending message to SNS: " + JSON.stringify(message));
-              return data.MessageId;
+              return logMetric(topicArn.substring(topicArn.lastIndexOf(":") + 1) + '-assignments-completed', 1)
+              .then(function() {
+                console.log("Sending message to SNS: " + JSON.stringify(message));
+                return data.MessageId;
+              })
             });
           });
         });

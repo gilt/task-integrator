@@ -413,6 +413,21 @@
                 }
               ]
             }
+          },
+          {
+            "PolicyName": "MetricPusher",
+            "PolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudwatch:PutMetricData"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
           }
         ]
       },
@@ -428,7 +443,7 @@
           "S3Bucket": "com.gilt.public.backoffice",
           "S3Key": "lambda_functions/task-integrator.zip"
         },
-        "Description": "Used to export task results from S3 into SNS",
+        "Description": "Used to export task results from Mechanical Turk into SNS",
         "Handler": "mechanicalTurk.export",
         "Role": { "Fn::GetAtt" : [ "MTurkExporterRole", "Arn" ] },
         "Runtime": "nodejs",

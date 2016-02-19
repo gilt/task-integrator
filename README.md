@@ -37,7 +37,11 @@ an SNS topic - one topic per task group. You can then subscribe to that SNS topi
    create your SNS topics (and subscriptions) ahead of time, in the format: stack_name-hit_layout_id. The
    Lambda function will automaticall create SNS topic if they don't exist, but they won't have subscriptions
    and thus messages will be missed (though they can be found in the logs).
-8. Set up alerts on the mechanical-turk-balance metric, to know when your account balance is low.
+8. Set up alerts for any metrics you care about:
+  a. *-mechanical-turk-balance => to know when your account balance is low.
+  b. *-tasks-created
+  c. *-assignments-created
+  d. *-assignments-completed
 
 
 ## Implementations
