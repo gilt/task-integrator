@@ -1,5 +1,6 @@
 var Promise = require('bluebird');
 var AWS = require("aws-sdk"),
+    cloudwatch = Promise.promisifyAll(new AWS.CloudWatch()),
     configLoader = require("./lib/dynamodb-config"),
     csv = Promise.promisifyAll(require('csv')),
     dynamodb = Promise.promisifyAll(new AWS.DynamoDB()),
@@ -48,7 +49,7 @@ exports.upload = function(event, lambdaContext) {
               Key: record.s3.object.key
             })
             .then(function(s3Object) {
-              return createHitsForCsv(s3Object.Body, baseRequest, context.mturkClient);
+              return createHitsForCsv(s3Object.Body, baseRequest, context.mturkClient, stackName, objectKey);
             })
             .then(function(hitIds) {
               return Promise
@@ -150,29 +151,46 @@ exports.export = function(event, lambdaContext) {
 // --- Private helper functions ---
 
 // Returns a Promise of the array of resultant HITIds.
-function createHitsForCsv(csvBody, baseRequest, mturkClient) {
+function createHitsForCsv(csvBody, baseRequest, mturkClient, stackName, objectKey) {
   return csv
   .parseAsync(csvBody)
   .then(function(csvDoc) {
     var header = csvDoc.shift();
-    return Promise.map(
-      csvDoc,
-      function(row) {
-        var hitLayoutParameters = {};
-        var request = baseRequest;
-        for (var i = 0; i < header.length; i++) {
-          hitLayoutParameters[header[i]] = sanitizeHtml(row[i]);
+    return mturkClient
+    .GetAccountBalanceAsync({})
+    .then(function(balance) {
+      var batchCost = baseRequest.Reward.Amount * csvDoc.length;
+      return logMetric(stackName + "-mechanical-turk-balance", balance)
+      .then(function(data) {
+        if (balance < batchCost) {
+          throw 'Batch ' + objectKey + ' not processed due to insufficient funds in the account: $' + balance + ' remaining but $' + batchCost + ' required.'
         }
-        request["HITLayoutParameters"] = hitLayoutParameters;
-        console.log("Creating HIT: " + JSON.stringify(request));
-        return mturkClient
-        .CreateHITAsync(request)
-        .then(function(hitId) {
-          console.log("Created HIT " + hitId);
-          return hitId;
+        return Promise.map(
+          csvDoc,
+          function(row) {
+            var hitLayoutParameters = {};
+            var request = baseRequest;
+            for (var i = 0; i < header.length; i++) {
+              hitLayoutParameters[header[i]] = sanitizeHtml(row[i]);
+            }
+            request["HITLayoutParameters"] = hitLayoutParameters;
+            console.log("Creating HIT: " + JSON.stringify(request));
+            return mturkClient
+            .CreateHITAsync(request)
+            .then(function(hitId) {
+              console.log("Created HIT " + hitId);
+              return hitId;
+            });
+          }
+        );
+      })
+      .then(function(hitIds) {
+        return logMetric(stackName + "-mechanical-turk-balance", balance - batchCost)
+        .then(function(data) {
+          return hitIds;
         });
-      }
-    );
+      });
+    })
   });
 }
 
@@ -210,6 +228,21 @@ function getStackName(functionName, functionIdentifier) {
     return functionName.substr(0, i);
   else
     return functionName;
+}
+
+// Returns a Promise that will perform logging for the given metric.
+function logMetric(name, value) {
+  console.log('Logging: ' + name + '=' + value);
+  return cloudwatch.putMetricDataAsync({
+    MetricData: [
+      {
+        MetricName: name,
+        Timestamp: new Date,
+        Value: value
+      }
+    ],
+    Namespace: "task-integrator"
+  })
 }
 
 // Returns a Promise containing an aray of messageIds of the resultant SNS messages.
